@@ -1,37 +1,23 @@
 package cliente;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.MulticastSocket;
+import java.net.Inet4Address;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Scanner;
 
+import javafx.util.Pair;
 import mensagem.Mensagem;
+import mensagem.Pacote;
 
 public class Cliente {
 	
+	public static int PORTA_LOCAL;
 	public static int PORTA = 12345;
-	public static String END_MULTICAST = "239.0.0.1";
 	public static String SERVIDOR = "localhost";
-	
-	public static byte[] serialize(Object obj) throws IOException {
-	    ByteArrayOutputStream out = new ByteArrayOutputStream();
-	    ObjectOutputStream os = new ObjectOutputStream(out);
-	    os.writeObject(obj);
-	    return out.toByteArray();
-	}
-	
-	public static Object deserialize(byte[] data) throws IOException, ClassNotFoundException {
-	    ByteArrayInputStream in = new ByteArrayInputStream(data);
-	    ObjectInputStream is = new ObjectInputStream(in);
-	    return is.readObject();
-	}
-	
+		
 	private static String critografar(String s){
 		
 		String result="";
@@ -45,73 +31,100 @@ public class Cliente {
 	
 	public static void receberMensagem(String nome){
 		
-		boolean receberMensagem=true;
-		
-		while(receberMensagem) {
-			try {       
-				MulticastSocket mcs = new MulticastSocket(PORTA);
-				InetAddress grp = InetAddress.getByName(END_MULTICAST);
-				mcs.joinGroup(grp);
-				byte rec[] = new byte[4096];
-				DatagramPacket pkg = new DatagramPacket(rec, rec.length);
-				mcs.receive(pkg);
-				Mensagem m = (Mensagem) deserialize(rec);
+		try {
 				
-				if(m.getReceptor().equals(nome)){
-					System.out.println("Recebido uma mensagem de " + m.getMandatario() + " : "  + m.getMensagem());
-				}
-				mcs.close();
-				receberMensagem=false;
-			}catch(Exception e) {
-				System.out.println("Erro: " + e.getMessage()); 
-			} 
-		}
+			ServerSocket receptor = new ServerSocket(PORTA_LOCAL);
+				
+			Socket cliente = receptor.accept();
+				
+			ObjectInputStream   entrada = new ObjectInputStream(cliente.getInputStream());
+			Mensagem m = (Mensagem)entrada.readObject();
+			entrada.close();
+				
+			System.out.println("Recebida mensagem de " + m.getMandatario());
+			System.out.println("Mensagem: " + m.getMensagem());
+				
+			receptor.close();
+				
+		}catch(Exception e) {
+			System.out.println("Erro: " + e.getMessage()); 
+		} 
 	}
 	
 	public static void main(String[] args) {
 		
-		System.out.print("Digite o nome do seu usuário: ");
-		Scanner scanner = new Scanner(System.in);  
-		String nome = scanner.nextLine();
+		if(args.length==2){
 		
-		System.out.println("\n");
-		
-		boolean continua=true;
-		
-		while(continua){
-		
-			System.out.println("O que deseja fazer?");
-			System.out.println("1 - Escrever mensagem");
-			System.out.println("2 - Receber mensagem");
-			System.out.println("3 - Sair do programa");
-			System.out.print(">>> ");
-			int op = scanner.nextInt();
+			//Definidos parâmetros para comunicação
+			PORTA_LOCAL = Integer.parseInt(args[1]);
+			String nome  = args[0];			
 			
-			System.out.println("\n");
-			
-			switch(op){
-				case 1:
-					escreverMensagem(nome);
-				break;
-				case 2:
+			try {
+				
+				Socket rec = new Socket  (SERVIDOR,PORTA,null,PORTA_LOCAL);
+				ObjectOutputStream saida = new ObjectOutputStream(rec.getOutputStream());
+				saida.flush();
+				
+			    Scanner scanner = new Scanner(System.in); 
+				
+				boolean continua=true;
+				Pacote p;
+				
+				while(continua){
 					
-					System.out.println("Esperando a mensagem...");
+					System.out.println("O que deseja fazer?");
+					System.out.println("1 - Escrever mensagem");
+					System.out.println("2 - Receber mensagem");
+					System.out.println("3 - Sair do programa");
+					System.out.print(">>> ");
+					int op = scanner.nextInt();
 					
-					receberMensagem(nome);
-				break;
-				default:
-					continua=false;
-				break;	
+					System.out.println("\n");
+					
+					switch(op){
+						case 1:
+							
+						    p = new Pacote(nome,"ESCREVER_MENSAGEM",escreverMensagem(nome));
+							saida.writeObject(p);
+						    saida.close();
+						    
+						break;
+						case 2:
+							
+							p = new Pacote(nome,"RECEBER_MENSAGEM");
+							
+							saida.writeObject(p);
+							saida.close();
+							
+							System.out.println("Esperando a mensagem...");
+							
+							receberMensagem(nome);
+						break;
+						default:
+							continua=false;
+						break;	
+					}
+					
+					System.out.println("\n");
+					
+				}
+				
+				rec.close();
+				scanner.close();
+			    
+			    
+			} catch (IOException e) {
+				
+				e.printStackTrace();
 			}
-			
-			System.out.println("\n");
-			
+		}else{
+			System.out.println("Informe nos parâmetros:");
+			System.out.println("1º parâmetro: Nome do cliente");
+			System.out.println("2º parâmetro: Número da porta");
 		}
-		
-		scanner.close();
 	}
 
-	private static void escreverMensagem(String mandatario) {  
+	private static Mensagem escreverMensagem(String mandatario) {  
 		
 		Scanner scanner = new Scanner(System.in);  
 		
@@ -120,20 +133,7 @@ public class Cliente {
 		System.out.print("Digite o conteúdo da menssagem: ");
 		String mensagem = scanner.nextLine();
 		
-		Mensagem m = new Mensagem(critografar(mensagem), mandatario, destinatario);
-		
-		try {
+		return  new Mensagem(critografar(mensagem), mandatario, destinatario);
 			
-			Socket rec = new Socket(SERVIDOR,PORTA);
-			ObjectOutputStream saida = new ObjectOutputStream(rec.getOutputStream());
-		    saida.writeObject(m);
-		    saida.close();
-		    rec.close();
-		    
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-		
 	}
 }
